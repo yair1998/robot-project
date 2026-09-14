@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package robotagent;
+
+option java_package = "com.robotproject.robotagent";
+option java_multiple_files = true;
+
+// Persistent bidirectional stream between the robot agent
+// and the Java backend.
+service RobotChannel {
+  rpc Connect(stream Telemetry) returns (stream Command);
+}
+
+// A navigation target selected by the backend.
+message Waypoint {
+  double x = 1;
+  double y = 2;
+}
+
+// Sent periodically from the robot (C++) to the backend (Java).
+message Telemetry {
+  string robot_id = 1;
+  double position_x = 2;
+  double position_y = 3;
+  double speed = 4;
+  double battery = 5;
+  int64 timestamp = 6;
+
+  // May be absent when no valid proximity reading is available.
+  optional double nearest_obstacle_distance = 7;
+
+  // C++ computes and explicitly sets this on every telemetry message.
+  bool emergency_stop = 8;
+}
+
+// Sent from the backend (Java) to the robot (C++).
+message Command {
+  string robot_id = 1;
+  CommandType type = 2;
+  double target_speed = 3;
+  int64 command_id = 4;
+
+  // Present when Java supplies a navigation target.
+  Waypoint target = 5;
+}
+
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  COMMAND_TYPE_CONTINUE = 1;
+  COMMAND_TYPE_SLOW_DOWN = 2;
+  COMMAND_TYPE_STOP = 3;
+  COMMAND_TYPE_RESUME = 4;
+  COMMAND_TYPE_REROUTE = 5;
+}

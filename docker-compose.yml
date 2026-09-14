@@ -1,0 +1,21 @@
+services:
+  java-backend:
+    build: ./java-backend
+    volumes:
+      - ./java-backend:/app
+      - ./proto:/app/src/main/proto:ro
+    tty: true
+    networks:
+      - robot-net
+
+  cpp-agent:
+    build: ./cpp-agent
+    volumes:
+      - ./cpp-agent:/app
+      - ./proto:/app/proto
+    tty: true
+    networks:
+      - robot-net
+
+networks:
+  robot-net:

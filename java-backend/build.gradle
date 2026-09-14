@@ -1,0 +1,53 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'com.google.protobuf' version '0.10.0'
+}
+
+application {
+    mainClass = 'com.robotproject.server.RobotServer'
+}
+
+sourceSets {
+    main {
+        proto {
+            srcDir '../proto'
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'io.grpc:grpc-protobuf:1.83.1'
+    implementation 'io.grpc:grpc-stub:1.83.1'
+    runtimeOnly 'io.grpc:grpc-netty-shaded:1.83.1'
+    implementation 'com.google.code.gson:gson:2.11.0'
+}
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:3.25.8'
+    }
+
+    plugins {
+        grpc {
+            artifact = 'io.grpc:protoc-gen-grpc-java:1.83.1'
+        }
+    }
+
+    generateProtoTasks {
+        all()*.plugins {
+            grpc {}
+        }
+    }
+}
+
+tasks.register('runRoutingDemo', JavaExec) {
+    group = 'application'
+    description = 'Runs the routing demo (RoutingDemo.main) as a one-off.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.robotproject.server.routing.RoutingDemo'
+}

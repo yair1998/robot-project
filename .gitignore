@@ -1,0 +1,12 @@
+# Java / Gradle
+java-backend/build/
+java-backend/bin/
+java-backend/.gradle/
+
+# C++ / CMake
+cpp-agent/build/
+
+# Logs
+*.log
+# Local Claude settings
+.claude/settings.local.json
