@@ -38,10 +38,14 @@ struct RobotState {
     double target_y = 0.0;
 
     bool stopped = false;
+
+    double target_speed = kFakeSpeedMetersPerSecond;
 };
 
 void applyCommand(RobotState& state, const Command& command) {
     std::lock_guard<std::mutex> lock(state.mutex);
+
+    state.target_speed = command.target_speed();
 
     if (command.type() == robotagent::COMMAND_TYPE_STOP) {
         state.stopped = true;
@@ -84,7 +88,7 @@ void advancePosition(RobotState& state, double dtSeconds) {
         return;
     }
 
-    double step = kFakeSpeedMetersPerSecond * dtSeconds;
+    double step = state.target_speed * dtSeconds;
     double ratio = step / distance;
 
     state.position_x += dx * ratio;

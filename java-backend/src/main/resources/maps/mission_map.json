@@ -1,0 +1,16 @@
+{
+  "nodes": [
+    { "id": "A", "x": 0,  "y": 0 },
+    { "id": "B", "x": 10, "y": 0 },
+    { "id": "C", "x": 20, "y": 0 },
+    { "id": "D", "x": 10, "y": 9 },
+    { "id": "E", "x": 20, "y": 10 }
+  ],
+  "edges": [
+    { "from": "A", "to": "B", "bidirectional": true },
+    { "from": "B", "to": "C", "bidirectional": true },
+    { "from": "B", "to": "D", "bidirectional": true },
+    { "from": "D", "to": "E", "bidirectional": true },
+    { "from": "C", "to": "E", "bidirectional": true }
+  ]
+}

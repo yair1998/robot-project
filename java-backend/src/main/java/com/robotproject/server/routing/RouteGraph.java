@@ -45,4 +45,8 @@ public class RouteGraph {
             }
         }
     }
+
+    public java.util.Collection<GraphNode> allNodes() {
+        return nodes.values();
+    }
 }
