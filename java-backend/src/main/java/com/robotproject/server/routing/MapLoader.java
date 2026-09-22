@@ -28,7 +28,11 @@ public class MapLoader {
             graph.addNode(new GraphNode(n.id, n.x, n.y));
         }
         for (EdgeData e : data.edges) {
-            graph.addEdge(e.from, e.to, e.bidirectional);
+            if (e.width != null) {
+                graph.addEdge(e.from, e.to, e.bidirectional, e.width);
+            } else {
+                graph.addEdge(e.from, e.to, e.bidirectional);
+            }
         }
         return graph;
     }
@@ -48,5 +52,8 @@ public class MapLoader {
         String from;
         String to;
         boolean bidirectional;
+        Double width; // nullable - Gson leaves this null when the JSON
+                       // edge object omits "width", so existing maps
+                       // with no "width" key continue to work unchanged.
     }
 }

@@ -65,3 +65,10 @@ tasks.register('runConcurrencyDemo', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.robotproject.server.routing.ConcurrencyDemo'
 }
+
+tasks.register('runWidthCapacityDemo', JavaExec) {
+    group = 'application'
+    description = 'Runs the width-capacity demo (WidthCapacityDemo.main) as a one-off.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.robotproject.server.routing.WidthCapacityDemo'
+}

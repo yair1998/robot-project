@@ -17,6 +17,10 @@ public class RouteGraph {
     }
 
     public void addEdge(String fromId, String toId, boolean bidirectional) {
+        addEdge(fromId, toId, bidirectional, GraphEdge.UNCONSTRAINED_WIDTH_METERS);
+    }
+
+    public void addEdge(String fromId, String toId, boolean bidirectional, double widthMeters) {
         GraphNode from = nodes.get(fromId);
         GraphNode to = nodes.get(toId);
         if (from == null || to == null) {
@@ -24,9 +28,15 @@ public class RouteGraph {
                     "Unknown node id in edge: " + fromId + " -> " + toId);
         }
         double cost = from.distanceTo(to);
-        adjacency.get(fromId).add(new GraphEdge(fromId, toId, cost));
+
+        GraphEdge forward = new GraphEdge(fromId, toId, cost);
+        forward.setPassableWidthMeters(widthMeters);
+        adjacency.get(fromId).add(forward);
+
         if (bidirectional) {
-            adjacency.get(toId).add(new GraphEdge(toId, fromId, cost));
+            GraphEdge backward = new GraphEdge(toId, fromId, cost);
+            backward.setPassableWidthMeters(widthMeters);
+            adjacency.get(toId).add(backward);
         }
     }
 
