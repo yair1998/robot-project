@@ -78,7 +78,8 @@ public class MissionDemo {
                 + "), partway along B->D (edge length 9m, ~2m traveled). Fully blocking B->D...");
 
         int before = fullLog.size();
-        mm.reportEdgeObstruction("B", "D", "a-block", 0.3, 0.9, pos[0], pos[1]);
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.reportEdgeObstruction("B", "D", "a-block", 0.3, 0.9);
         String segment = newSegment(before);
         check("fully blocking the CURRENT edge (B->D) logs a retreat to B, not a mid-edge continue",
                 segment.contains("retreating to B"));
@@ -145,7 +146,8 @@ public class MissionDemo {
                 + "), partway along B->D. Blocking the FUTURE edge D->E (robot is not on it yet)...");
 
         int before = fullLog.size();
-        mm.reportEdgeObstruction("D", "E", "b-block", 0.3, 0.5, pos[0], pos[1]);
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.reportEdgeObstruction("D", "E", "b-block", 0.3, 0.5);
         String segment = newSegment(before);
         check("blocking a FUTURE edge logs a forward replan, not a retreat",
                 segment.contains("A future edge on the planned route changed"));
@@ -197,7 +199,8 @@ public class MissionDemo {
         System.out.println("Robot now at (" + fmt(pos[0]) + ", " + fmt(pos[1]) + "), mid-way on A->B.");
 
         int before = fullLog.size();
-        mm.reportEdgeObstruction("A", "B", "c-degrade", 0.75, 0.5, pos[0], pos[1]);
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.reportEdgeObstruction("A", "B", "c-degrade", 0.75, 0.5);
         String segment = newSegment(before);
         check("degrading the CURRENT edge (not fully blocked) logs 'degraded but still passable'",
                 segment.contains("degraded but still passable"));
@@ -231,7 +234,8 @@ public class MissionDemo {
                 + "), ~67% along B->D. Reporting a full block at 30% (behind the robot)...");
 
         int before1 = fullLog.size();
-        mm1.reportEdgeObstruction("B", "D", "d1-block", 0.3, 0.3, pos1[0], pos1[1]);
+        mm1.updateRobotPosition(robotId1, pos1[0], pos1[1]);
+        mm1.reportEdgeObstruction("B", "D", "d1-block", 0.3, 0.3);
         String segment1 = newSegment(before1);
         check("blockage behind the robot logs 'continuing forward', not a retreat",
                 segment1.contains("continuing forward") && !segment1.contains("retreating to"));
@@ -256,7 +260,8 @@ public class MissionDemo {
                 + "), ~67% along B->D. Reporting a full block at 90% (ahead of the robot)...");
 
         int before2 = fullLog.size();
-        mm2.reportEdgeObstruction("B", "D", "d2-block", 0.3, 0.9, pos2[0], pos2[1]);
+        mm2.updateRobotPosition(robotId2, pos2[0], pos2[1]);
+        mm2.reportEdgeObstruction("B", "D", "d2-block", 0.3, 0.9);
         String segment2 = newSegment(before2);
         check("blockage ahead of the robot still logs a retreat to B",
                 segment2.contains("retreating to B"));
@@ -278,7 +283,8 @@ public class MissionDemo {
         driveUntilNextTarget(mm, robotId, pos, initial, 50); // to B, next target D
 
         moveToward(pos, graph.getNode("D"), 2.0);
-        mm.reportEdgeObstruction("B", "D", "e-block", 0.3, 0.9, pos[0], pos[1]); // full block at 0.9, ahead of the robot -> retreat
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.reportEdgeObstruction("B", "D", "e-block", 0.3, 0.9); // full block at 0.9, ahead of the robot -> retreat
         GraphNode retreatTarget = mm.onTelemetry(robotId, pos[0], pos[1], "E");
         check("retreat to B begins as expected", retreatTarget != null && "B".equals(retreatTarget.getId()));
 
@@ -288,7 +294,8 @@ public class MissionDemo {
         // the (frozen, forward) mission edge nor the remaining path, and
         // was silently ignored.
         int before = fullLog.size();
-        mm.reportEdgeObstruction("D", "B", "e-block", 0.75, 0.1, pos[0], pos[1]);
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.reportEdgeObstruction("D", "B", "e-block", 0.75, 0.1);
         String segment = newSegment(before);
         check("signal on the reverse retreat edge (D->B) is now recognized as the current edge",
                 segment.contains("Current edge (D->B) degraded but still passable"));
@@ -313,11 +320,13 @@ public class MissionDemo {
         driveUntilNextTarget(mm, robotId, pos, initial, 50);
 
         moveToward(pos, graph.getNode("D"), 2.0);
-        mm.reportEdgeObstruction("B", "D", "f-block-1", 0.3, 0.9, pos[0], pos[1]);
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.reportEdgeObstruction("B", "D", "f-block-1", 0.3, 0.9);
         mm.onTelemetry(robotId, pos[0], pos[1], "E"); // dispatch retreat target
 
         int before = fullLog.size();
-        mm.reportEdgeObstruction("D", "B", "f-block-2", 0.3, 0.1, pos[0], pos[1]); // full block on retreat edge itself
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.reportEdgeObstruction("D", "B", "f-block-2", 0.3, 0.1); // full block on retreat edge itself
         String segment = newSegment(before);
         check("both-directions-blocked case logs the explicit warning",
                 segment.contains("WARNING: retreat edge"));
@@ -347,7 +356,8 @@ public class MissionDemo {
                 + "edge's own naming (D->B, local position 0.1 - close to D)...");
 
         int before = fullLog.size();
-        mm.reportEdgeObstruction("D", "B", "python-cross-event", 0.3, 0.1, pos[0], pos[1]);
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.reportEdgeObstruction("D", "B", "python-cross-event", 0.3, 0.1);
         check("a report using the REVERSE direction's naming still triggers a retreat "
                         + "for a robot tracked on the FORWARD direction",
                 newSegment(before).contains("retreating to B"));
@@ -383,8 +393,10 @@ public class MissionDemo {
         // roll back - leaving the robot stuck mid-retreat rather than
         // genuinely untouched, which would defeat the point of this case.
         int before = fullLog.size();
-        mm.reportEdgeObstruction("B", "D", "behind-event", 0.3, 0.1, pos[0], pos[1]);
-        mm.reportEdgeObstruction("B", "D", "ahead-event", 0.3, 0.9, pos[0], pos[1]);
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.reportEdgeObstruction("B", "D", "behind-event", 0.3, 0.1);
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.reportEdgeObstruction("B", "D", "ahead-event", 0.3, 0.9);
         check("both-directions-blocked at the INITIAL decision logs the explicit warning",
                 newSegment(before).contains("WARNING: both directions"));
 
@@ -437,7 +449,8 @@ public class MissionDemo {
         graph.getEdge("B", "D").setPassableWidthMeters(0.8);
 
         int before = fullLog.size();
-        mm.reportWorldObstruction("python-world-event", 10.0, 6.0, 0.5, pos[0], pos[1]);
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.reportWorldObstruction("python-world-event", 10.0, 6.0, 0.5);
         String segment = newSegment(before);
         check("the world-coordinate report is logged as mapped onto the B-D corridor",
                 segment.contains("mapped to edge B->D") || segment.contains("mapped to edge D->B"));
@@ -447,7 +460,8 @@ public class MissionDemo {
         GraphNode retreatTarget = mm.onTelemetry(robotId, pos[0], pos[1], "E");
         check("retreat target dispatched is B", retreatTarget != null && "B".equals(retreatTarget.getId()));
 
-        mm.clearWorldObstruction("python-world-event", pos[0], pos[1]);
+        mm.updateRobotPosition(robotId, pos[0], pos[1]);
+        mm.clearWorldObstruction("python-world-event");
     }
 
     // Steps the fake robot toward `aimAt`, calling onTelemetry() each tick,

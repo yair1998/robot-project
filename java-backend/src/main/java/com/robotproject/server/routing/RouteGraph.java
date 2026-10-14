@@ -89,6 +89,28 @@ public class RouteGraph {
 
     public List<ObstructionHistoryEntry> getObstructionHistory() { return obstructionContext.historySnapshot(); }
 
+    /**
+     * One entry per physical corridor whose structural width is unknown: "from-to" for a bidirectional
+     * pair (listed once, from < to alphabetically), "from->to" for a one-way edge. Sorted.
+     */
+    public List<String> corridorsWithUnknownWidth() {
+        java.util.TreeSet<String> result = new java.util.TreeSet<>();
+        for (GraphEdge edge : allEdges()) {
+            if (edge.isPassableWidthKnown()) {
+                continue;
+            }
+            GraphEdge reverse = getEdge(edge.getToId(), edge.getFromId());
+            if (reverse != null && reverse.sharesCorridorWith(edge)) {
+                String a = edge.getFromId();
+                String b = edge.getToId();
+                result.add(a.compareTo(b) < 0 ? a + "-" + b : b + "-" + a);
+            } else {
+                result.add(edge.getFromId() + "->" + edge.getToId());
+            }
+        }
+        return new ArrayList<>(result);
+    }
+
     public static class EdgeProjection {
         public final String fromId;
         public final String toId;

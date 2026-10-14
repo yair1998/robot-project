@@ -179,22 +179,23 @@ public class WidthCapacityDemo {
         System.out.println("=== mission_map.json regression guard ===");
 
         RouteGraph graph = MapLoader.loadFromClasspath("maps/mission_map.json");
-        boolean allUnconstrained = true;
+        boolean allDeclared = true;
         int edgeCount = 0;
         for (GraphNode node : graph.allNodes()) {
             for (GraphEdge edge : graph.edgesFrom(node.getId())) {
                 edgeCount++;
-                if (edge.getCurrentEffectiveWidthMeters() != GraphEdge.UNCONSTRAINED_WIDTH_METERS) {
-                    allUnconstrained = false;
+                double declared = declaredMissionMapWidth(edge.getFromId(), edge.getToId());
+                if (Math.abs(edge.getCurrentEffectiveWidthMeters() - declared) > 1e-9) {
+                    allDeclared = false;
                     System.out.println("  UNEXPECTED WIDTH: " + edge.getFromId() + " -> " + edge.getToId()
-                            + " = " + edge.getCurrentEffectiveWidthMeters());
+                            + " = " + edge.getCurrentEffectiveWidthMeters() + " (declared " + declared + ")");
                 }
             }
         }
-        check("every one of " + edgeCount + " directed edges in mission_map.json still has "
-                        + "getCurrentEffectiveWidthMeters() == UNCONSTRAINED_WIDTH_METERS ("
-                        + GraphEdge.UNCONSTRAINED_WIDTH_METERS + ")",
-                allUnconstrained && edgeCount > 0);
+        check("every one of " + edgeCount + " directed edges in mission_map.json has "
+                        + "getCurrentEffectiveWidthMeters() == its declared width "
+                        + "(A-B 2.4, B-C 2.4, B-D 1.8, D-E 1.8, C-E 1.2)",
+                allDeclared && edgeCount == 10);
 
         System.out.println();
         System.out.println("=== metric-only invariants ===");
@@ -292,14 +293,35 @@ public class WidthCapacityDemo {
         RouteGraph missionGraph = MapLoader.loadFromClasspath("maps/mission_map.json");
         int directedEdges = 0;
         int knownWidths = 0;
+        int matchingDeclared = 0;
         for (GraphEdge edge : missionGraph.allEdges()) {
             directedEdges++;
             if (edge.isPassableWidthKnown()) {
                 knownWidths++;
             }
+            if (Math.abs(edge.getPassableWidthMeters()
+                    - declaredMissionMapWidth(edge.getFromId(), edge.getToId())) <= 1e-9) {
+                matchingDeclared++;
+            }
         }
-        check("(g) all 10 directed edges of mission_map.json report isPassableWidthKnown() == false (got "
-                + directedEdges + " edges, " + knownWidths + " known)", directedEdges == 10 && knownWidths == 0);
+        check("(g) all 10 directed edges of mission_map.json report isPassableWidthKnown() == true, each equal to "
+                + "its declared width (got " + directedEdges + " edges, " + knownWidths + " known, "
+                + matchingDeclared + " matching)",
+                directedEdges == 10 && knownWidths == 10 && matchingDeclared == 10);
+
+        List<String> missionUnknown = missionGraph.corridorsWithUnknownWidth();
+        check("(g) corridorsWithUnknownWidth() is empty for mission_map.json (got " + missionUnknown + ")",
+                missionUnknown.isEmpty());
+        List<String> exampleUnknown = MapLoader.loadFromClasspath("maps/example_map.json").corridorsWithUnknownWidth();
+        check("(g) corridorsWithUnknownWidth() lists A-B, B-C, B-D, D-E for example_map.json (got "
+                + exampleUnknown + ")", exampleUnknown.equals(List.of("A-B", "B-C", "B-D", "D-E")));
+        RouteGraph oneWayOnly = new RouteGraph();
+        oneWayOnly.addNode(new GraphNode("P", 0.0, 0.0));
+        oneWayOnly.addNode(new GraphNode("Q", 10.0, 0.0));
+        oneWayOnly.addEdge("P", "Q", false, GraphEdge.UNCONSTRAINED_WIDTH_METERS);
+        List<String> oneWayUnknown = oneWayOnly.corridorsWithUnknownWidth();
+        check("(g) corridorsWithUnknownWidth() returns [P->Q] for a graph with one one-way edge (got "
+                + oneWayUnknown + ")", oneWayUnknown.equals(List.of("P->Q")));
 
         System.out.println();
         System.out.println("=== FINAL SUMMARY ===");
@@ -317,6 +339,17 @@ public class WidthCapacityDemo {
         double bCost = backward.effectiveCost();
         check(step + ": forward and backward capacity equal (" + fCap + " / " + bCap + ")", fCap == bCap);
         check(step + ": forward and backward cost equal (" + fCost + " / " + bCost + ")", fCost == bCost);
+    }
+
+    /** The widths declared in mission_map.json, either direction. */
+    private static double declaredMissionMapWidth(String from, String to) {
+        String key = from.compareTo(to) < 0 ? from + "-" + to : to + "-" + from;
+        switch (key) {
+            case "A-B": case "B-C": return 2.4;
+            case "B-D": case "D-E": return 1.8;
+            case "C-E": return 1.2;
+            default: return Double.NaN;
+        }
     }
 
     private static boolean declaresMethod(Class<?> type, String name) {

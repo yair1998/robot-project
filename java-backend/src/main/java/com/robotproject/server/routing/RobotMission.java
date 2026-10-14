@@ -38,9 +38,18 @@ public class RobotMission {
         return remainingPath.size() > 1 ? remainingPath.get(1) : null;
     }
 
-    public boolean isComplete() {
-        return remainingPath.size() <= 1;
+    public enum Status { EN_ROUTE, AT_DESTINATION, NO_ROUTE }
+
+    public Status status() {
+        if (remainingPath.size() > 1) { return Status.EN_ROUTE; }
+        if (remainingPath.size() == 1 && remainingPath.get(0).getId().equals(destinationNodeId)) {
+            return Status.AT_DESTINATION;
+        }
+        return Status.NO_ROUTE;                      // stranded: nothing left to travel, destination not reached
     }
+
+    /** True ONLY at the destination. A stranded mission is NOT complete. */
+    public boolean isComplete() { return status() == Status.AT_DESTINATION; }
 
     public void advance() {
         if (remainingPath.size() > 1) {

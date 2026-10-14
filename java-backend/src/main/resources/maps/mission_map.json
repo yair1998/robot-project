@@ -7,10 +7,10 @@
     { "id": "E", "x": 20, "y": 10 }
   ],
   "edges": [
-    { "from": "A", "to": "B", "bidirectional": true },
-    { "from": "B", "to": "C", "bidirectional": true },
-    { "from": "B", "to": "D", "bidirectional": true },
-    { "from": "D", "to": "E", "bidirectional": true },
-    { "from": "C", "to": "E", "bidirectional": true }
+    { "from": "A", "to": "B", "bidirectional": true, "width": 2.4 },
+    { "from": "B", "to": "C", "bidirectional": true, "width": 2.4 },
+    { "from": "B", "to": "D", "bidirectional": true, "width": 1.8 },
+    { "from": "D", "to": "E", "bidirectional": true, "width": 1.8 },
+    { "from": "C", "to": "E", "bidirectional": true, "width": 1.2 }
   ]
 }

@@ -311,7 +311,7 @@ public class ObstructionLifecycleDemo {
         MissionManager mm = new MissionManager(g, new AStarRouter());
         GraphEdge xy = g.getEdge("X", "Y");
 
-        mm.reportEdgeObstruction("X", "Y", "probe", 0.3, 0.5, ObstructionKind.TRANSIENT, null, 0, 0);
+        mm.reportEdgeObstruction("X", "Y", "probe", 0.3, 0.5, ObstructionKind.TRANSIENT, null);
         at(15);
         mm.onTelemetry("r", 0, 0, "Y");
         GraphNode initial = mm.initialTargetFor("r");
@@ -336,7 +336,7 @@ public class ObstructionLifecycleDemo {
         MissionManager mmb = new MissionManager(gb, new AStarRouter());
         GraphEdge xyb = gb.getEdge("X", "Y");
         mmb.reportEdgeObstruction("X", "Y", "probe", 0.3, 0.995, ObstructionKind.TRANSIENT,
-                clock.instant().minusSeconds(15), 0, 0);
+                clock.instant().minusSeconds(15));
         mmb.onTelemetry("r", 0, 0, "Y");
         before = fullLog.size();
         mmb.onTelemetry("r", 9.9, 0, "Y");
@@ -357,7 +357,7 @@ public class ObstructionLifecycleDemo {
         MissionManager mmc = new MissionManager(gc, new AStarRouter());
         GraphEdge xyc = gc.getEdge("X", "Y");
         mmc.reportEdgeObstruction("X", "Y", "probe", 0.3, 0.995, ObstructionKind.TRANSIENT,
-                clock.instant().minusSeconds(15), 0, 0);
+                clock.instant().minusSeconds(15));
         mmc.onTelemetry("r", 0, 0, "Y");
         before = fullLog.size();
         mmc.onTelemetry("r", 9.99, 0, "Y");
@@ -378,7 +378,7 @@ public class ObstructionLifecycleDemo {
         MissionManager mm = new MissionManager(g, new AStarRouter());
         GraphEdge xy = g.getEdge("X", "Y");
         mm.reportEdgeObstruction("X", "Y", "probe", 0.3, 0.5, ObstructionKind.TRANSIENT,
-                clock.instant().minusSeconds(15), 0, 0);
+                clock.instant().minusSeconds(15));
         mm.onTelemetry("r", 0, 0, "Y");
         GraphNode initial = mm.initialTargetFor("r");
         check("the direct mission is created (target Y, got " + describe(initial) + ")",
@@ -399,7 +399,7 @@ public class ObstructionLifecycleDemo {
         MissionManager mmn = new MissionManager(gn, new AStarRouter());
         GraphEdge xyn = gn.getEdge("X", "Y");
         mmn.reportEdgeObstruction("X", "Y", "probe", 0.3, 0.5, ObstructionKind.TRANSIENT,
-                clock.instant().minusSeconds(15), 0, 0);
+                clock.instant().minusSeconds(15));
         mmn.onTelemetry("r", 0, 0, "Y");
         mmn.observeProximity("r", 3.0, 0.0, 8.0);
         checkState("sensed 8.0m: the event stays STALE", xyn, "probe", ExpiryPolicy.State.STALE);
@@ -413,7 +413,7 @@ public class ObstructionLifecycleDemo {
         MissionManager mmb = new MissionManager(gb, new AStarRouter());
         GraphEdge xyb = gb.getEdge("X", "Y");
         mmb.reportEdgeObstruction("X", "Y", "behind", 0.3, 0.2, ObstructionKind.TRANSIENT,
-                clock.instant().minusSeconds(15), 0, 0);
+                clock.instant().minusSeconds(15));
         mmb.onTelemetry("r", 0, 0, "Y");
         before = fullLog.size();
         mmb.observeProximity("r", 3.0, 0.0, 2.0);
@@ -434,13 +434,13 @@ public class ObstructionLifecycleDemo {
 
         int before = fullLog.size();
         mm.reportWorldObstruction(new WorldObstructionReport("mv", AX, AY, 0.8, null,
-                ObstructionKind.TRANSIENT, null), 0, 0);
+                ObstructionKind.TRANSIENT, null));
         check("log contains \"mapped to edge\"", newSegment(before).contains("mapped to edge"));
         checkNear("at A: cap(X->Y) 0.0", cap(xy), 0.0);
 
         before = fullLog.size();
         mm.reportWorldObstruction(new WorldObstructionReport("mv", BX, BY, 0.8, null,
-                ObstructionKind.TRANSIENT, null), 0, 0);
+                ObstructionKind.TRANSIENT, null));
         checkNear("at B: cap(X->Y) 1.0", cap(xy), 1.0);
         checkNear("at B: cap(X->Z) 0.0", cap(xz), 0.0);
         check("log contains \"moved from corridor\"", newSegment(before).contains("moved from corridor"));
@@ -461,47 +461,47 @@ public class ObstructionLifecycleDemo {
         GraphEdge xy = g.getEdge("X", "Y");
         GraphEdge xz = g.getEdge("X", "Z");
 
-        mm.reportWorldObstruction(semi("m1", AX, AY, T0.plusSeconds(90)), 0, 0);
+        mm.reportWorldObstruction(semi("m1", AX, AY, T0.plusSeconds(90)));
         checkNear("1. 'm1' at A @90s accepted: cap(X->Y) 0.0", cap(xy), 0.0);
 
-        mm.reportWorldObstruction(semi("m1", BX, BY, T0.plusSeconds(95)), 0, 0);
+        mm.reportWorldObstruction(semi("m1", BX, BY, T0.plusSeconds(95)));
         checkNear("2. 'm1' at B @95s moved: cap(X->Y) 1.0", cap(xy), 1.0);
         checkNear("2. cap(X->Z) 0.0", cap(xz), 0.0);
 
         int before = fullLog.size();
-        mm.reportWorldObstruction(semi("m1", AX, AY, T0.plusSeconds(92)), 0, 0);
+        mm.reportWorldObstruction(semi("m1", AX, AY, T0.plusSeconds(92)));
         check("3. 'm1' at A @92s (older): log contains \"ignored\"", newSegment(before).contains("ignored"));
         checkNear("3. X->Y stays 1.0", cap(xy), 1.0);
         checkNear("3. X->Z stays 0.0", cap(xz), 0.0);
         checkCount("3. live count", mm.trackedWorldObstructionCount(), 1);
 
         before = fullLog.size();
-        mm.clearWorldObstruction("m1", T0.plusSeconds(94), 0, 0);
+        mm.clearWorldObstruction("m1", T0.plusSeconds(94));
         check("4. clear @94s (older than the latest sighting): ignored", newSegment(before).contains("ignored"));
         checkNear("4. X->Z still 0.0", cap(xz), 0.0);
 
-        mm.clearWorldObstruction("m1", T0.plusSeconds(96), 0, 0);
+        mm.clearWorldObstruction("m1", T0.plusSeconds(96));
         checkNear("5. clear @96s: X->Z 1.0", cap(xz), 1.0);
         checkCount("5. live count", mm.trackedWorldObstructionCount(), 0);
         checkCount("5. trackedTombstoneCount()", mm.trackedTombstoneCount(), 1);
 
         before = fullLog.size();
-        mm.reportWorldObstruction(semi("m1", BX, BY, T0.plusSeconds(96)), 0, 0);
+        mm.reportWorldObstruction(semi("m1", BX, BY, T0.plusSeconds(96)));
         check("6. 'm1' at B @96s (tie with the clear): ignored", newSegment(before).contains("ignored"));
         checkNear("6. X->Z stays 1.0", cap(xz), 1.0);
 
-        mm.reportWorldObstruction(semi("m1", BX, BY, T0.plusSeconds(97)), 0, 0);
+        mm.reportWorldObstruction(semi("m1", BX, BY, T0.plusSeconds(97)));
         checkNear("7. 'm1' at B @97s accepted: X->Z 0.0", cap(xz), 0.0);
         checkCount("7. tombstone count", mm.trackedTombstoneCount(), 0);
         checkCount("7. live count", mm.trackedWorldObstructionCount(), 1);
 
-        mm.clearWorldObstruction("n1", T0.plusSeconds(98), 0, 0);
+        mm.clearWorldObstruction("n1", T0.plusSeconds(98));
         checkCount("8. clear of never-seen 'n1' @98s: tombstone count", mm.trackedTombstoneCount(), 1);
         before = fullLog.size();
-        mm.reportWorldObstruction(semi("n1", AX, AY, T0.plusSeconds(97)), 0, 0);
+        mm.reportWorldObstruction(semi("n1", AX, AY, T0.plusSeconds(97)));
         check("8. 'n1' at A @97s (older than the clear): ignored", newSegment(before).contains("ignored"));
         checkNear("8. cap(X->Y) 1.0", cap(xy), 1.0);
-        mm.reportWorldObstruction(semi("n1", AX, AY, T0.plusSeconds(99)), 0, 0);
+        mm.reportWorldObstruction(semi("n1", AX, AY, T0.plusSeconds(99)));
         checkNear("8. 'n1' at A @99s accepted: cap(X->Y) 0.0", cap(xy), 0.0);
     }
 
@@ -516,7 +516,7 @@ public class ObstructionLifecycleDemo {
         GraphEdge xy = g.getEdge("X", "Y");
 
         mm.reportWorldObstruction(new WorldObstructionReport("w1", AX, AY, 0.8, null,
-                ObstructionKind.TRANSIENT, null), 0, 0);
+                ObstructionKind.TRANSIENT, null));
         checkCount("after reporting 'w1': live count", mm.trackedWorldObstructionCount(), 1);
 
         at(26);
@@ -524,7 +524,7 @@ public class ObstructionLifecycleDemo {
         checkCount("+26s, after purge: live count", mm.trackedWorldObstructionCount(), 0);
         checkCount("+26s, after purge: physicalObstructionCount()", xy.physicalObstructionCount(), 0);
 
-        mm.clearWorldObstruction("z9", null, 0, 0);
+        mm.clearWorldObstruction("z9", null);
         checkCount("after clearing never-seen 'z9': tombstone count", mm.trackedTombstoneCount(), 1);
         clock.advance(Duration.ofMinutes(11));
         mm.purgeExpiredObstructions();
@@ -544,7 +544,7 @@ public class ObstructionLifecycleDemo {
         GraphEdge yx = g.getEdge("Y", "X");
 
         mm.reportWorldObstruction(new WorldObstructionReport("f1", 5.0, 0.0, 0.8, null,
-                ObstructionKind.TRANSIENT, clock.instant().minusSeconds(10)), 0, 0);
+                ObstructionKind.TRANSIENT, clock.instant().minusSeconds(10)));
         ObstructionView v = view(xy, "f1");
         check("STALE at birth (got " + (v == null ? "no view" : v.state) + ")",
                 v != null && v.state == ExpiryPolicy.State.STALE);
@@ -563,7 +563,7 @@ public class ObstructionLifecycleDemo {
         gb.setStaleProbingEnabled(true);
         MissionManager mmb = new MissionManager(gb, new AStarRouter());
         GraphEdge xyb = gb.getEdge("X", "Y");
-        mmb.reportWorldObstruction(new WorldObstructionReport("f2", 5.0, 0.0, 0.1, 0.5, null, null), 0, 0);
+        mmb.reportWorldObstruction(new WorldObstructionReport("f2", 5.0, 0.0, 0.1, 0.5, null, null));
         ObstructionView vb = view(xyb, "f2");
         checkNear("remaining width 0.5 (not 1.2 - 0.1 = 1.1)",
                 vb == null ? Double.NaN : vb.remainingWidthMeters, 0.5);
@@ -582,7 +582,7 @@ public class ObstructionLifecycleDemo {
         RouteGraph ga = g1();
         MissionManager mma = new MissionManager(ga, new AStarRouter());
         int before = fullLog.size();
-        mma.reportWorldObstruction(WorldObstructionReport.basic("u1", 5.0, 0.0, 1.0), 0, 0);
+        mma.reportWorldObstruction(WorldObstructionReport.basic("u1", 5.0, 0.0, 1.0));
         check("(a) log contains \"assuming a 1.5m corridor\"",
                 newSegment(before).contains("assuming a 1.5m corridor"));
         checkNear("(a) cap(X->Y) 0.0 (remaining 0.5)", cap(ga.getEdge("X", "Y")), 0.0);
@@ -590,20 +590,20 @@ public class ObstructionLifecycleDemo {
         RouteGraph gb = g1();
         MissionManager mmb = new MissionManager(gb, new AStarRouter());
         before = fullLog.size();
-        mmb.reportWorldObstruction(WorldObstructionReport.basic("u2", 5.0, 0.0, 0.2), 0, 0);
+        mmb.reportWorldObstruction(WorldObstructionReport.basic("u2", 5.0, 0.0, 0.2));
         check("(b) log contains \"assuming\"", newSegment(before).contains("assuming"));
         checkNear("(b) cap(X->Y) 1.0 (remaining 1.3)", cap(gb.getEdge("X", "Y")), 1.0);
 
         RouteGraph gc = g1();
         gc.setAssumedUnknownCorridorWidthMeters(3.0);
         MissionManager mmc = new MissionManager(gc, new AStarRouter());
-        mmc.reportWorldObstruction(WorldObstructionReport.basic("u3", 5.0, 0.0, 1.0), 0, 0);
+        mmc.reportWorldObstruction(WorldObstructionReport.basic("u3", 5.0, 0.0, 1.0));
         checkNear("(c) assumed width 3.0, obstacle 1.0: cap(X->Y) 1.0", cap(gc.getEdge("X", "Y")), 1.0);
 
         RouteGraph gd = g2();
         MissionManager mmd = new MissionManager(gd, new AStarRouter());
         before = fullLog.size();
-        mmd.reportWorldObstruction(WorldObstructionReport.basic("u4", 5.0, 0.0, 0.8), 0, 0);
+        mmd.reportWorldObstruction(WorldObstructionReport.basic("u4", 5.0, 0.0, 0.8));
         check("(d) known width 1.2: log does NOT contain \"assuming\"",
                 !newSegment(before).contains("assuming"));
         checkNear("(d) cap(X->Y) 0.0", cap(gd.getEdge("X", "Y")), 0.0);
@@ -648,9 +648,9 @@ public class ObstructionLifecycleDemo {
 
         MissionManager mm = new MissionManager(g, new AStarRouter());
         mm.reportWorldObstruction(new WorldObstructionReport("mv", AX, AY, 0.8, null,
-                ObstructionKind.TRANSIENT, null), 0, 0);
+                ObstructionKind.TRANSIENT, null));
         mm.reportWorldObstruction(new WorldObstructionReport("mv", BX, BY, 0.8, null,
-                ObstructionKind.TRANSIENT, null), 0, 0);
+                ObstructionKind.TRANSIENT, null));
         check("(d) history contains (mv, MOVED)",
                 historyContains(g, "mv", ObstructionHistoryEntry.EndReason.MOVED));
 
@@ -691,7 +691,7 @@ public class ObstructionLifecycleDemo {
                 boolean onA = true;
                 while (System.nanoTime() < end) {
                     mm.reportWorldObstruction(WorldObstructionReport.basic(
-                            "mv", onA ? AX : BX, onA ? AY : BY, 0.8), 0, 0);
+                            "mv", onA ? AX : BX, onA ? AY : BY, 0.8));
                     writes.incrementAndGet();
                     onA = !onA;
                 }
