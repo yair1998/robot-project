@@ -736,8 +736,9 @@ public class ObstructionLifecycleDemo {
             System.setOut(teeOut);
         }
 
-        System.out.println("writer reports: " + writes.get() + ", reader iterations: " + reads.get()
-                + ", empty paths seen: " + emptyPaths.get() + ", non-empty paths seen: " + nonEmptyPaths.get());
+        // The iteration and path counts depend on thread timing, so they are deliberately not printed: the output of
+        // this demo must be identical from run to run. Only the timing-independent properties below are asserted.
+        System.out.println("writer and reader finished (iteration and path counts are timing-dependent and not printed)");
 
         check("no exception in the writer thread (got " + writerError.get() + ")", writerError.get() == null);
         check("no exception in the reader thread (got " + readerError.get() + ")", readerError.get() == null);
@@ -745,8 +746,7 @@ public class ObstructionLifecycleDemo {
                 badPath.get() == null);
         check("every X->Y cost is exactly 10.0 or +INFINITY (first bad cost: " + badCost.get() + ")",
                 badCost.get() == null);
-        check("the reader saw at least one non-empty path (got " + nonEmptyPaths.get() + ")",
-                nonEmptyPaths.get() > 0);
+        check("the reader observed at least 1 non-empty path", nonEmptyPaths.get() > 0);
         checkCount("at the end: trackedWorldObstructionCount()", mm.trackedWorldObstructionCount(), 1);
         int views = xy.getObstructionViews().size() + xz.getObstructionViews().size();
         checkCount("at the end: views across the X-Y and X-Z corridors", views, 1);

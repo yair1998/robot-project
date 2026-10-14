@@ -86,3 +86,25 @@ tasks.register('runObstructionLifecycleDemo', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.robotproject.server.routing.ObstructionLifecycleDemo'
 }
+
+tasks.register('runMissionRobustnessDemo', JavaExec) {
+    group = 'application'
+    description = 'Runs the mission robustness demo (MissionRobustnessDemo.main) as a one-off.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.robotproject.server.routing.MissionRobustnessDemo'
+}
+
+tasks.register('runDispatchDemo', JavaExec) {
+    group = 'application'
+    description = 'Runs the dispatch demo (DispatchDemo.main) as a one-off.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.robotproject.server.routing.DispatchDemo'
+}
+
+tasks.register('runLiveHarness', JavaExec) {
+    group = 'application'
+    description = 'Runs the real gRPC server with a scripted obstruction injector: -Pscenario=<name> (default reroute_before_arrival).'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.robotproject.server.LiveHarness'
+    args = [project.findProperty('scenario') ?: 'reroute_before_arrival']
+}
