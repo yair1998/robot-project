@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.util.List;
 
 public class MissionDemo {
 
@@ -29,6 +30,10 @@ public class MissionDemo {
             scenarioD_locationAwareBlockageChoosesDirection();
             scenarioE_signalOnRetreatEdgeIsRecognized();
             scenarioF_bothDirectionsBlockedIsFlaggedNotHandled();
+            scenarioH_crossDirectionReportAffectsLiveRobot();
+            scenarioI_bothDirectionsBlockedAtInitialDecision();
+            scenarioJ_widthAffectsRouteCostDirectly();
+            scenarioK_realisticWorldCoordinateReportDrivesCorrectReaction();
         } finally {
             System.setOut(originalOut);
         }
@@ -43,9 +48,9 @@ public class MissionDemo {
     }
 
     // SCENARIO A: the robot's CURRENT edge (B->D) becomes fully blocked
-    // while it is mid-way along it, well before arriving at D. There is no
-    // signal for where the blockage sits relative to the robot, so forward
-    // progress cannot be assumed safe - the robot must retreat to the last
+    // while it is mid-way along it, well before arriving at D. The blockage
+    // is reported at 0.9 along B->D, ahead of the robot, so forward
+    // progress is not safe - the robot must retreat to the last
     // confirmed node (B), and only after that retreat is physically
     // confirmed does MissionManager replan from B (which, with B->D now
     // excluded, must go via C).
@@ -73,7 +78,7 @@ public class MissionDemo {
                 + "), partway along B->D (edge length 9m, ~2m traveled). Fully blocking B->D...");
 
         int before = fullLog.size();
-        mm.onGraphCapacityChanged("B", "D", 0.0, pos[0], pos[1]);
+        mm.reportEdgeObstruction("B", "D", "a-block", 0.3, 0.9, pos[0], pos[1]);
         String segment = newSegment(before);
         check("fully blocking the CURRENT edge (B->D) logs a retreat to B, not a mid-edge continue",
                 segment.contains("retreating to B"));
@@ -140,7 +145,7 @@ public class MissionDemo {
                 + "), partway along B->D. Blocking the FUTURE edge D->E (robot is not on it yet)...");
 
         int before = fullLog.size();
-        mm.onGraphCapacityChanged("D", "E", 0.0, pos[0], pos[1]);
+        mm.reportEdgeObstruction("D", "E", "b-block", 0.3, 0.5, pos[0], pos[1]);
         String segment = newSegment(before);
         check("blocking a FUTURE edge logs a forward replan, not a retreat",
                 segment.contains("A future edge on the planned route changed"));
@@ -192,7 +197,7 @@ public class MissionDemo {
         System.out.println("Robot now at (" + fmt(pos[0]) + ", " + fmt(pos[1]) + "), mid-way on A->B.");
 
         int before = fullLog.size();
-        mm.onGraphCapacityChanged("A", "B", 0.5, pos[0], pos[1]);
+        mm.reportEdgeObstruction("A", "B", "c-degrade", 0.75, 0.5, pos[0], pos[1]);
         String segment = newSegment(before);
         check("degrading the CURRENT edge (not fully blocked) logs 'degraded but still passable'",
                 segment.contains("degraded but still passable"));
@@ -207,12 +212,13 @@ public class MissionDemo {
     private static void scenarioD_locationAwareBlockageChoosesDirection() throws IOException {
         header("SCENARIO D: location-aware full block - behind continues, ahead still retreats");
 
-        // Each half of this scenario needs its own graph instance -
-        // RouteGraph.setEdgeCapacity() mutates the graph in place, so
-        // sharing one instance would let mm1's full block on B->D leak
-        // into mm2's supposedly-independent mission (mm2 would then
-        // never route through D at all, invalidating the "ahead of the
-        // robot" half of this test).
+        // Each half of this scenario needs its own graph instance - an
+        // obstruction report is stored on the shared B-D corridor and
+        // applies to the whole corridor, whichever direction's naming it
+        // was reported through, so sharing one instance would let mm1's
+        // full block on B-D leak into mm2's supposedly-independent
+        // mission (mm2 would then never route through D at all,
+        // invalidating the "ahead of the robot" half of this test).
         RouteGraph graph1 = MapLoader.loadFromClasspath("maps/mission_map.json");
         MissionManager mm1 = new MissionManager(graph1, new AStarRouter());
         String robotId1 = "robot-d1";
@@ -225,7 +231,7 @@ public class MissionDemo {
                 + "), ~67% along B->D. Reporting a full block at 30% (behind the robot)...");
 
         int before1 = fullLog.size();
-        mm1.onGraphCapacityChanged("B", "D", 0.0, pos1[0], pos1[1], 0.3);
+        mm1.reportEdgeObstruction("B", "D", "d1-block", 0.3, 0.3, pos1[0], pos1[1]);
         String segment1 = newSegment(before1);
         check("blockage behind the robot logs 'continuing forward', not a retreat",
                 segment1.contains("continuing forward") && !segment1.contains("retreating to"));
@@ -250,7 +256,7 @@ public class MissionDemo {
                 + "), ~67% along B->D. Reporting a full block at 90% (ahead of the robot)...");
 
         int before2 = fullLog.size();
-        mm2.onGraphCapacityChanged("B", "D", 0.0, pos2[0], pos2[1], 0.9);
+        mm2.reportEdgeObstruction("B", "D", "d2-block", 0.3, 0.9, pos2[0], pos2[1]);
         String segment2 = newSegment(before2);
         check("blockage ahead of the robot still logs a retreat to B",
                 segment2.contains("retreating to B"));
@@ -272,7 +278,7 @@ public class MissionDemo {
         driveUntilNextTarget(mm, robotId, pos, initial, 50); // to B, next target D
 
         moveToward(pos, graph.getNode("D"), 2.0);
-        mm.onGraphCapacityChanged("B", "D", 0.0, pos[0], pos[1]); // full block, no location -> retreat
+        mm.reportEdgeObstruction("B", "D", "e-block", 0.3, 0.9, pos[0], pos[1]); // full block at 0.9, ahead of the robot -> retreat
         GraphNode retreatTarget = mm.onTelemetry(robotId, pos[0], pos[1], "E");
         check("retreat to B begins as expected", retreatTarget != null && "B".equals(retreatTarget.getId()));
 
@@ -282,7 +288,7 @@ public class MissionDemo {
         // the (frozen, forward) mission edge nor the remaining path, and
         // was silently ignored.
         int before = fullLog.size();
-        mm.onGraphCapacityChanged("D", "B", 0.5, pos[0], pos[1]);
+        mm.reportEdgeObstruction("D", "B", "e-block", 0.75, 0.1, pos[0], pos[1]);
         String segment = newSegment(before);
         check("signal on the reverse retreat edge (D->B) is now recognized as the current edge",
                 segment.contains("Current edge (D->B) degraded but still passable"));
@@ -307,11 +313,11 @@ public class MissionDemo {
         driveUntilNextTarget(mm, robotId, pos, initial, 50);
 
         moveToward(pos, graph.getNode("D"), 2.0);
-        mm.onGraphCapacityChanged("B", "D", 0.0, pos[0], pos[1]);
+        mm.reportEdgeObstruction("B", "D", "f-block-1", 0.3, 0.9, pos[0], pos[1]);
         mm.onTelemetry(robotId, pos[0], pos[1], "E"); // dispatch retreat target
 
         int before = fullLog.size();
-        mm.onGraphCapacityChanged("D", "B", 0.0, pos[0], pos[1]); // full block on retreat edge itself
+        mm.reportEdgeObstruction("D", "B", "f-block-2", 0.3, 0.1, pos[0], pos[1]); // full block on retreat edge itself
         String segment = newSegment(before);
         check("both-directions-blocked case logs the explicit warning",
                 segment.contains("WARNING: retreat edge"));
@@ -321,6 +327,127 @@ public class MissionDemo {
         GraphNode afterRetreat = driveUntilNextTarget(mm, robotId, pos, graph.getNode("B"), 50);
         check("retreat still completes despite the flagged warning (next target C)",
                 afterRetreat != null && "C".equals(afterRetreat.getId()));
+    }
+
+    private static void scenarioH_crossDirectionReportAffectsLiveRobot() throws IOException {
+        header("SCENARIO H: obstruction reported via the REVERSE direction's naming still triggers the correct reaction for a robot traveling forward");
+
+        RouteGraph graph = MapLoader.loadFromClasspath("maps/mission_map.json");
+        MissionManager mm = new MissionManager(graph, new AStarRouter());
+        String robotId = "robot-h";
+        double[] pos = {0.0, 0.0};
+
+        mm.onTelemetry(robotId, pos[0], pos[1], "E");
+        GraphNode initial = mm.initialTargetFor(robotId);
+        driveUntilNextTarget(mm, robotId, pos, initial, 50);
+
+        moveToward(pos, graph.getNode("D"), 2.0);
+        System.out.println("Robot at (" + fmt(pos[0]) + ", " + fmt(pos[1])
+                + "), traveling B->D. Reporting a severe obstruction using the REVERSE "
+                + "edge's own naming (D->B, local position 0.1 - close to D)...");
+
+        int before = fullLog.size();
+        mm.reportEdgeObstruction("D", "B", "python-cross-event", 0.3, 0.1, pos[0], pos[1]);
+        check("a report using the REVERSE direction's naming still triggers a retreat "
+                        + "for a robot tracked on the FORWARD direction",
+                newSegment(before).contains("retreating to B"));
+
+        GraphNode retreatTarget = mm.onTelemetry(robotId, pos[0], pos[1], "E");
+        check("retreat target dispatched is B", retreatTarget != null && "B".equals(retreatTarget.getId()));
+    }
+
+    private static void scenarioI_bothDirectionsBlockedAtInitialDecision() throws IOException {
+        header("SCENARIO I: both directions blocked at the INITIAL decision - flagged, no action");
+
+        RouteGraph graph = MapLoader.loadFromClasspath("maps/mission_map.json");
+        MissionManager mm = new MissionManager(graph, new AStarRouter());
+        String robotId = "robot-i";
+        double[] pos = {0.0, 0.0};
+
+        mm.onTelemetry(robotId, pos[0], pos[1], "E");
+        GraphNode initial = mm.initialTargetFor(robotId);
+        driveUntilNextTarget(mm, robotId, pos, initial, 50);
+
+        moveToward(pos, graph.getNode("D"), 4.0);
+        System.out.println("Robot at (" + fmt(pos[0]) + ", " + fmt(pos[1])
+                + "). Reporting obstructions on BOTH sides of the robot's position, same edge...");
+
+        // Order matters here: reporting BEHIND first causes a single-sided
+        // "continuing forward" reaction (matches Scenario D's proven
+        // behavior) that does NOT enter recovery state. Reporting AHEAD
+        // second then finds both sides already blocked in the SAME
+        // reaction pass and takes the flagged no-action branch, from a
+        // clean (non-recovering) base. Reporting AHEAD first would
+        // instead trigger a real retreat after just that one event, which
+        // the second event's "both blocked, no action" branch does not
+        // roll back - leaving the robot stuck mid-retreat rather than
+        // genuinely untouched, which would defeat the point of this case.
+        int before = fullLog.size();
+        mm.reportEdgeObstruction("B", "D", "behind-event", 0.3, 0.1, pos[0], pos[1]);
+        mm.reportEdgeObstruction("B", "D", "ahead-event", 0.3, 0.9, pos[0], pos[1]);
+        check("both-directions-blocked at the INITIAL decision logs the explicit warning",
+                newSegment(before).contains("WARNING: both directions"));
+
+        GraphNode result = mm.onTelemetry(robotId, pos[0], pos[1], "E");
+        check("no target is dispatched while both directions are flagged as blocked",
+                result == null);
+    }
+
+    private static void scenarioJ_widthAffectsRouteCostDirectly() throws IOException {
+        header("SCENARIO J: a width-based obstruction changes A*'s chosen route, proving effectiveCost() actually reflects it");
+
+        RouteGraph graph = MapLoader.loadFromClasspath("maps/mission_map.json");
+        AStarRouter router = new AStarRouter();
+
+        List<GraphNode> beforePath = router.findPath(graph, "A", "E");
+        check("before any obstruction, A* picks the D-route",
+                beforePath.size() == 4 && "D".equals(beforePath.get(2).getId()));
+
+        GraphEdge edge = graph.getEdge("B", "D");
+        edge.reportObstructionEvent("scenario-j-event", 0.3);
+
+        List<GraphNode> afterPath = router.findPath(graph, "A", "E");
+        check("after a severe width-based obstruction, A* now avoids B->D and routes via C",
+                afterPath.stream().noneMatch(n -> "D".equals(n.getId()))
+                        && afterPath.stream().anyMatch(n -> "C".equals(n.getId())));
+
+        edge.clearObstructionEvent("scenario-j-event");
+        List<GraphNode> clearedPath = router.findPath(graph, "A", "E");
+        check("clearing the obstruction restores the original D-route",
+                clearedPath.size() == 4 && "D".equals(clearedPath.get(2).getId()));
+    }
+
+    private static void scenarioK_realisticWorldCoordinateReportDrivesCorrectReaction() throws IOException {
+        header("SCENARIO K: a raw world-coordinate report (no edge/direction knowledge assumed) drives the correct reaction via the new translation layer");
+
+        RouteGraph graph = MapLoader.loadFromClasspath("maps/mission_map.json");
+        MissionManager mm = new MissionManager(graph, new AStarRouter());
+        String robotId = "robot-k";
+        double[] pos = {0.0, 0.0};
+
+        mm.onTelemetry(robotId, pos[0], pos[1], "E");
+        GraphNode initial = mm.initialTargetFor(robotId);
+        driveUntilNextTarget(mm, robotId, pos, initial, 50);
+
+        moveToward(pos, graph.getNode("D"), 2.0);
+        System.out.println("Robot at (" + fmt(pos[0]) + ", " + fmt(pos[1])
+                + "). Narrowing B->D's structural width, then reporting a raw WORLD-COORDINATE "
+                + "obstruction near (10, 6) - ahead of the robot, no edge/direction specified...");
+
+        graph.getEdge("B", "D").setPassableWidthMeters(0.8);
+
+        int before = fullLog.size();
+        mm.reportWorldObstruction("python-world-event", 10.0, 6.0, 0.5, pos[0], pos[1]);
+        String segment = newSegment(before);
+        check("the world-coordinate report is logged as mapped onto the B-D corridor",
+                segment.contains("mapped to edge B->D") || segment.contains("mapped to edge D->B"));
+        check("the resulting severe obstruction (ahead of the robot) triggers a retreat",
+                segment.contains("retreating to B"));
+
+        GraphNode retreatTarget = mm.onTelemetry(robotId, pos[0], pos[1], "E");
+        check("retreat target dispatched is B", retreatTarget != null && "B".equals(retreatTarget.getId()));
+
+        mm.clearWorldObstruction("python-world-event", pos[0], pos[1]);
     }
 
     // Steps the fake robot toward `aimAt`, calling onTelemetry() each tick,

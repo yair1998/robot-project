@@ -1,6 +1,13 @@
 package com.robotproject.server.routing;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class WidthCapacityDemo {
 
@@ -95,6 +102,80 @@ public class WidthCapacityDemo {
                 afterClearingIrrelevantEvent == 0.0);
 
         System.out.println();
+        System.out.println("=== cross-direction: a report on one direction is visible to the other ===");
+
+        RouteGraph bdGraph = new RouteGraph();
+        bdGraph.addNode(new GraphNode("B", 0.0, 0.0));
+        bdGraph.addNode(new GraphNode("D", 10.0, 0.0));
+        bdGraph.addEdge("B", "D", true, GraphEdge.UNCONSTRAINED_WIDTH_METERS);
+
+        GraphEdge forwardBD = bdGraph.getEdge("B", "D");
+        GraphEdge backwardDB = bdGraph.getEdge("D", "B");
+
+        forwardBD.reportObstructionEventAt("cross-dir-event", 0.4, 0.3);
+
+        System.out.println("after reporting on FORWARD (B->D) at local 0.3, remaining 0.4m: "
+                + "backward (D->B) getCurrentEffectiveWidthMeters()=" + backwardDB.getCurrentEffectiveWidthMeters()
+                + ", capacityFactor=" + backwardDB.getCapacityFactor());
+        checkApprox(
+                "the BACKWARD edge's effective width also reflects the ~0.4m obstruction",
+                backwardDB.getCurrentEffectiveWidthMeters(),
+                0.4);
+        checkExact(
+                "the BACKWARD edge's capacityFactor is 0.0 (0.4m <= 0.6m robot width)",
+                backwardDB.getCapacityFactor(),
+                0.0);
+
+        double backwardAheadAt09 = backwardDB.getEffectiveWidthAheadOfPosition(0.9);
+        System.out.println("BACKWARD edge, getEffectiveWidthAheadOfPosition(0.9) [obstruction is BEHIND "
+                + "this direction] = " + backwardAheadAt09);
+        checkExact(
+                "ahead of the BACKWARD direction at its own local 0.9, the obstruction (behind it) "
+                        + "is excluded -> unconstrained width",
+                backwardAheadAt09,
+                GraphEdge.UNCONSTRAINED_WIDTH_METERS);
+
+        double backwardAheadAt01 = backwardDB.getEffectiveWidthAheadOfPosition(0.1);
+        System.out.println("BACKWARD edge, getEffectiveWidthAheadOfPosition(0.1) [obstruction is still "
+                + "AHEAD from this direction] = " + backwardAheadAt01);
+        checkApprox(
+                "ahead of the BACKWARD direction at its own local 0.1, the obstruction (still ahead) "
+                        + "is included -> ~0.4m",
+                backwardAheadAt01,
+                0.4);
+
+        System.out.println();
+        System.out.println("=== structural floor is included in EVERY directional query, both directions ===");
+
+        RouteGraph floorGraph = new RouteGraph();
+        floorGraph.addNode(new GraphNode("B", 0.0, 0.0));
+        floorGraph.addNode(new GraphNode("D", 10.0, 0.0));
+        floorGraph.addEdge("B", "D", true, 0.5);
+
+        GraphEdge floorForward = floorGraph.getEdge("B", "D");
+        GraphEdge floorBackward = floorGraph.getEdge("D", "B");
+
+        double[] positions = {0.1, 0.5, 0.9};
+        for (double p : positions) {
+            checkApprox(
+                    "forward edge, getEffectiveWidthAheadOfPosition(" + p + ") includes structural floor -> 0.5",
+                    floorForward.getEffectiveWidthAheadOfPosition(p),
+                    0.5);
+            checkApprox(
+                    "forward edge, getEffectiveWidthBehindPosition(" + p + ") includes structural floor -> 0.5",
+                    floorForward.getEffectiveWidthBehindPosition(p),
+                    0.5);
+            checkApprox(
+                    "backward edge, getEffectiveWidthAheadOfPosition(" + p + ") includes structural floor -> 0.5",
+                    floorBackward.getEffectiveWidthAheadOfPosition(p),
+                    0.5);
+            checkApprox(
+                    "backward edge, getEffectiveWidthBehindPosition(" + p + ") includes structural floor -> 0.5",
+                    floorBackward.getEffectiveWidthBehindPosition(p),
+                    0.5);
+        }
+
+        System.out.println();
         System.out.println("=== mission_map.json regression guard ===");
 
         RouteGraph graph = MapLoader.loadFromClasspath("maps/mission_map.json");
@@ -116,11 +197,215 @@ public class WidthCapacityDemo {
                 allUnconstrained && edgeCount > 0);
 
         System.out.println();
+        System.out.println("=== metric-only invariants ===");
+
+        // (a) A report through the backward instance blocks the forward direction too.
+        RouteGraph tri = new RouteGraph();
+        tri.addNode(new GraphNode("X", 0.0, 0.0));
+        tri.addNode(new GraphNode("Y", 10.0, 0.0));
+        tri.addNode(new GraphNode("Z", 10.0, 10.0));
+        tri.addEdge("X", "Y", true, GraphEdge.UNCONSTRAINED_WIDTH_METERS);
+        tri.addEdge("X", "Z", true, GraphEdge.UNCONSTRAINED_WIDTH_METERS);
+        tri.addEdge("Z", "Y", true, GraphEdge.UNCONSTRAINED_WIDTH_METERS);
+        AStarRouter router = new AStarRouter();
+
+        tri.getEdge("Y", "X").reportObstructionEvent("rev", 0.3);
+        checkExact("(a) report via BACKWARD Y->X: FORWARD X->Y getCapacityFactor() is 0.0",
+                tri.getEdge("X", "Y").getCapacityFactor(), 0.0);
+        String blockedRoute = pathIds(router.findPath(tri, "X", "Y"));
+        check("(a) A* routes X->Y via Z (got " + blockedRoute + ")", blockedRoute.equals("X,Z,Y"));
+        tri.getEdge("Y", "X").clearObstructionEvent("rev");
+        String clearedRoute = pathIds(router.findPath(tri, "X", "Y"));
+        check("(a) cleared through the backward instance: the direct route returns (got "
+                + clearedRoute + ")", clearedRoute.equals("X,Y"));
+
+        // (b) No staleness: both directions agree after every single step.
+        RouteGraph pair = new RouteGraph();
+        pair.addNode(new GraphNode("B", 0.0, 0.0));
+        pair.addNode(new GraphNode("D", 10.0, 0.0));
+        pair.addEdge("B", "D", true, GraphEdge.UNCONSTRAINED_WIDTH_METERS);
+        GraphEdge fwd = pair.getEdge("B", "D");
+        GraphEdge bwd = pair.getEdge("D", "B");
+
+        fwd.reportObstructionEvent("e1", 0.75);
+        checkDirectionsAgree("(b) after reporting e1 0.75 via forward", fwd, bwd);
+        bwd.reportObstructionEventAt("e2", 0.3, 0.5);
+        checkDirectionsAgree("(b) after reporting e2 0.3 at 0.5 via backward", fwd, bwd);
+        bwd.clearObstructionEvent("e2");
+        checkDirectionsAgree("(b) after clearing e2 via backward", fwd, bwd);
+        bwd.setPassableWidthMeters(0.8);
+        checkDirectionsAgree("(b) after setPassableWidthMeters(0.8) via backward", fwd, bwd);
+        fwd.clearObstructionEvent("e1");
+        checkDirectionsAgree("(b) after clearing e1 via forward", fwd, bwd);
+        checkApprox("(b) final value equals computeCapacityFromWidth(0.8, 0.6)",
+                fwd.getCapacityFactor(), GraphEdge.computeCapacityFromWidth(0.8, 0.6));
+
+        // (c) A one-way edge has its own corridor: a report changes only it.
+        RouteGraph oneWay = new RouteGraph();
+        oneWay.addNode(new GraphNode("P", 0.0, 0.0));
+        oneWay.addNode(new GraphNode("Q", 10.0, 0.0));
+        oneWay.addNode(new GraphNode("R", 0.0, 10.0));
+        oneWay.addEdge("P", "Q", false, GraphEdge.UNCONSTRAINED_WIDTH_METERS);
+        oneWay.addEdge("P", "R", true, GraphEdge.UNCONSTRAINED_WIDTH_METERS);
+        GraphEdge pq = oneWay.getEdge("P", "Q");
+        boolean oneWayThrew = false;
+        try {
+            pq.reportObstructionEvent("ow", 0.3);
+        } catch (RuntimeException e) {
+            oneWayThrew = true;
+        }
+        check("(c) reporting on a one-way edge throws nothing", !oneWayThrew);
+        checkExact("(c) the one-way edge P->Q itself is blocked", pq.getCapacityFactor(), 0.0);
+        check("(c) there is no reverse Q->P edge to be affected", oneWay.getEdge("Q", "P") == null);
+        checkExact("(c) unrelated edge P->R is unchanged", oneWay.getEdge("P", "R").getCapacityFactor(), 1.0);
+        checkExact("(c) unrelated edge R->P is unchanged", oneWay.getEdge("R", "P").getCapacityFactor(), 1.0);
+
+        // (d) Band pins.
+        checkExact("(d) computeCapacityFromWidth(0.6, 0.6)", GraphEdge.computeCapacityFromWidth(0.6, 0.6), 0.0);
+        checkApprox("(d) computeCapacityFromWidth(0.69, 0.6) ~ 0.3", GraphEdge.computeCapacityFromWidth(0.69, 0.6), 0.3);
+        checkApprox("(d) computeCapacityFromWidth(0.75, 0.6) ~ 0.5", GraphEdge.computeCapacityFromWidth(0.75, 0.6), 0.5);
+        checkExact("(d) computeCapacityFromWidth(0.9, 0.6)", GraphEdge.computeCapacityFromWidth(0.9, 0.6), 1.0);
+
+        // (e) Structure guard: the deleted percentage mechanism cannot come back unnoticed.
+        for (String name : new String[] {"setCapacityFactor", "applyCapacityFactor", "linkSibling", "recomputeCapacity"}) {
+            check("(e) GraphEdge declares no method " + name, !declaresMethod(GraphEdge.class, name));
+        }
+        for (String name : new String[] {"capacityFactor", "sibling"}) {
+            check("(e) GraphEdge declares no field " + name, !declaresField(GraphEdge.class, name));
+        }
+        check("(e) RouteGraph declares no method setEdgeCapacity", !declaresMethod(RouteGraph.class, "setEdgeCapacity"));
+        for (String name : new String[] {"onGraphCapacityChanged", "clearStaleOnCompletedEdge"}) {
+            check("(e) MissionManager declares no method " + name, !declaresMethod(MissionManager.class, name));
+        }
+        check("(e) MissionManager declares no field obstructionEventEdges",
+                !declaresField(MissionManager.class, "obstructionEventEdges"));
+
+        // (f) Stress: a writer on the forward instance vs. a reader on the backward instance.
+        runDirectionStress();
+
+        // (g) isPassableWidthKnown().
+        GraphEdge widthProbe = new GraphEdge("X", "Y", 10.0);
+        check("(g) a fresh unconstrained edge: isPassableWidthKnown() is false", !widthProbe.isPassableWidthKnown());
+        widthProbe.setPassableWidthMeters(0.8);
+        check("(g) after setPassableWidthMeters(0.8): isPassableWidthKnown() is true",
+                widthProbe.isPassableWidthKnown());
+        RouteGraph missionGraph = MapLoader.loadFromClasspath("maps/mission_map.json");
+        int directedEdges = 0;
+        int knownWidths = 0;
+        for (GraphEdge edge : missionGraph.allEdges()) {
+            directedEdges++;
+            if (edge.isPassableWidthKnown()) {
+                knownWidths++;
+            }
+        }
+        check("(g) all 10 directed edges of mission_map.json report isPassableWidthKnown() == false (got "
+                + directedEdges + " edges, " + knownWidths + " known)", directedEdges == 10 && knownWidths == 0);
+
+        System.out.println();
         System.out.println("=== FINAL SUMMARY ===");
         System.out.println(passCount + " passed, " + failCount + " failed");
         if (failCount > 0) {
             System.exit(1);
         }
+    }
+
+    /** Both directions of one corridor must report identical capacity and cost - no stored copy to go stale. */
+    private static void checkDirectionsAgree(String step, GraphEdge forward, GraphEdge backward) {
+        double fCap = forward.getCapacityFactor();
+        double bCap = backward.getCapacityFactor();
+        double fCost = forward.effectiveCost();
+        double bCost = backward.effectiveCost();
+        check(step + ": forward and backward capacity equal (" + fCap + " / " + bCap + ")", fCap == bCap);
+        check(step + ": forward and backward cost equal (" + fCost + " / " + bCost + ")", fCost == bCost);
+    }
+
+    private static boolean declaresMethod(Class<?> type, String name) {
+        for (Method m : type.getDeclaredMethods()) {
+            if (m.getName().equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean declaresField(Class<?> type, String name) {
+        for (Field f : type.getDeclaredFields()) {
+            if (f.getName().equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String pathIds(List<GraphNode> path) {
+        List<String> ids = new ArrayList<>();
+        for (GraphNode n : path) {
+            ids.add(n.getId());
+        }
+        return String.join(",", ids);
+    }
+
+    /** (f) ~1s: a writer alternates report/clear on the forward instance, a reader polls the backward one. */
+    private static void runDirectionStress() {
+        RouteGraph stressPair = new RouteGraph();
+        stressPair.addNode(new GraphNode("B", 0.0, 0.0));
+        stressPair.addNode(new GraphNode("D", 10.0, 0.0));
+        stressPair.addEdge("B", "D", true, GraphEdge.UNCONSTRAINED_WIDTH_METERS);
+        GraphEdge forward = stressPair.getEdge("B", "D");
+        GraphEdge backward = stressPair.getEdge("D", "B");
+
+        AtomicBoolean writerDone = new AtomicBoolean(false);
+        AtomicReference<Throwable> writerError = new AtomicReference<>();
+        AtomicReference<Throwable> readerError = new AtomicReference<>();
+        AtomicReference<Double> outOfRange = new AtomicReference<>();
+        AtomicInteger writes = new AtomicInteger();
+        AtomicInteger reads = new AtomicInteger();
+
+        Thread writer = new Thread(() -> {
+            try {
+                long end = System.nanoTime() + 1_000_000_000L;
+                while (System.nanoTime() < end) {
+                    forward.reportObstructionEvent("s", 0.3);
+                    forward.clearObstructionEvent("s");
+                    writes.incrementAndGet();
+                }
+            } catch (Throwable t) {
+                writerError.set(t);
+            } finally {
+                writerDone.set(true);
+            }
+        }, "stress-writer");
+
+        Thread reader = new Thread(() -> {
+            try {
+                while (!writerDone.get()) {
+                    double c = backward.getCapacityFactor();
+                    if (c < 0.0 || c > 1.0) {
+                        outOfRange.compareAndSet(null, c);
+                    }
+                    backward.effectiveCost();
+                    reads.incrementAndGet();
+                }
+            } catch (Throwable t) {
+                readerError.set(t);
+            }
+        }, "stress-reader");
+
+        reader.start();
+        writer.start();
+        try {
+            writer.join();
+            reader.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            readerError.compareAndSet(null, e);
+        }
+
+        System.out.println("(f) stress: " + writes.get() + " report/clear pairs, " + reads.get() + " reads");
+        check("(f) the writer thread threw nothing (got " + writerError.get() + ")", writerError.get() == null);
+        check("(f) the reader thread threw nothing (got " + readerError.get() + ")", readerError.get() == null);
+        check("(f) every observed capacity is within [0,1] (first out of range: " + outOfRange.get() + ")",
+                outOfRange.get() == null);
     }
 
     private static void checkExact(String description, double actual, double expected) {

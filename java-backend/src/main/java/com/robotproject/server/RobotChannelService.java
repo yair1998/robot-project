@@ -39,7 +39,7 @@ public class RobotChannelService
      * proactive command) - not wired to anything live yet. Exercised
      * only from a manual test/demo until a real trigger exists, the
      * same "prove standalone before wiring live" pattern already used
-     * for onGraphCapacityChanged.
+     * for MissionManager's obstruction-reporting entry points.
      */
     public void sendUrgentCommand(String robotId, Command command) {
         RobotConnection connection = connections.get(robotId);

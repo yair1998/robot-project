@@ -72,3 +72,17 @@ tasks.register('runWidthCapacityDemo', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.robotproject.server.routing.WidthCapacityDemo'
 }
+
+tasks.register('runEdgeProjectionDemo', JavaExec) {
+    group = 'application'
+    description = 'Runs the edge projection demo (EdgeProjectionDemo.main) as a one-off.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.robotproject.server.routing.EdgeProjectionDemo'
+}
+
+tasks.register('runObstructionLifecycleDemo', JavaExec) {
+    group = 'application'
+    description = 'Runs the obstruction lifecycle demo (ObstructionLifecycleDemo.main) as a one-off.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.robotproject.server.routing.ObstructionLifecycleDemo'
+}
