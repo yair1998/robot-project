@@ -88,6 +88,7 @@ public class DispatchDemo {
                 d11_concurrency();
                 d12_retreatDueUnderStop();
                 d13_boundaryCaseDirected();
+                d14_clearSpeedIndependentOfTelemetry();
                 perRun.add(outcomes);
                 runFailures[run - 1] = failCount - failuresBefore;
             }
@@ -528,6 +529,36 @@ public class DispatchDemo {
                 + b.lateReroute.get() + ")", b.lateReroute.get() != null);
         if (failCount == failuresBefore && passCount + failCount - checksBefore == D13_CHECKS) {
             d13PassedRuns++;
+        }
+    }
+
+    /**
+     * D14: in the CLEAR band every command carries the cruise speed, whatever speed the robot reports. A speed taken
+     * from telemetry would ratchet: a slowed or stopped robot reports a low speed, that low speed comes back as the
+     * commanded speed, and the robot can never speed up again.
+     */
+    private static void d14_clearSpeedIndependentOfTelemetry() {
+        header("D14: in the CLEAR band target_speed is the cruise speed, independent of the reported speed");
+        for (double reported : new double[] {0.0, 0.3, 1.0}) {
+            RobotChannelService svc = new RobotChannelService();
+            MissionManager mm = svc.getMissionManager();
+            Robot r = new Robot(svc, ROBOT);
+            prelude(r, null, reported, CommandType.COMMAND_TYPE_CONTINUE);
+            List<Cmd> prelude = r.obs.snapshot();
+            int n = r.obs.size();
+            mm.reportEdgeObstruction("B", "D", "blk", 0.3, 0.9);
+            List<Cmd> urgent = r.obs.since(n);
+            r.tick(10, 2, null, false, reported);
+            String at = "reported " + reported + ": ";
+            check(at + "telemetry REROUTE (10.0, 0.0) carries 1.0 (got " + prelude.get(0).speed + ")", prelude.get(0).speed == 1.0);
+            check(at + "telemetry REROUTE (10.0, 9.0) carries 1.0 (got " + prelude.get(1).speed + ")", prelude.get(1).speed == 1.0);
+            check(at + "CONTINUE carries 1.0 (got " + prelude.get(2).speed + ")", prelude.get(2).speed == 1.0);
+            check(at + "the urgent retreat REROUTE (10.0, 0.0) carries 1.0 (got " + urgent + ", speed "
+                    + (urgent.isEmpty() ? "none" : urgent.get(0).speed) + ")",
+                    urgent.size() == 1 && urgent.get(0).is(CommandType.COMMAND_TYPE_REROUTE, 10.0, 0.0)
+                            && urgent.get(0).speed == 1.0);
+            check(at + "the next CONTINUE carries 1.0 (got " + r.obs.last().speed + ")",
+                    r.obs.last().type == CommandType.COMMAND_TYPE_CONTINUE && r.obs.last().speed == 1.0);
         }
     }
 

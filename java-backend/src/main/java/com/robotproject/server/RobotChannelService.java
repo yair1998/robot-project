@@ -26,7 +26,9 @@ public class RobotChannelService
     enum SafetyVerdict { CLEAR, SLOW, STOP_PROXIMITY, STOP_EMERGENCY }
 
     private static final double SLOW_SPEED = 1.0;
-    private static final double DEFAULT_CRUISE_SPEED = 1.0;
+    /** The commanded speed in the CLEAR band. Never taken from telemetry: a measured speed sent back as the commanded
+     *  speed ratchets down (a slowed or stopped robot reports a low speed and is then told to keep it). */
+    private static final double CRUISE_SPEED = 1.0;
     private static final Duration HELD_WARNING_AFTER = Duration.ofSeconds(10);
 
     private final MissionManager missionManager = new MissionManager(
@@ -46,7 +48,6 @@ public class RobotChannelService
         final AtomicLong nextCommandId = new AtomicLong(1L);
         volatile SafetyVerdict verdict = SafetyVerdict.CLEAR;
         volatile Instant lastTelemetryAt;
-        volatile double lastReportedSpeed;
         volatile Instant heldSince;
         volatile boolean heldWarningLogged;
 
@@ -219,12 +220,12 @@ public class RobotChannelService
         }
     }
 
-    /** SLOW band: the SLOW speed, never faster. CLEAR: the robot's reported speed, or the default cruise speed when that is 0. */
+    /** SLOW band: the SLOW speed, never faster. CLEAR: the cruise speed, never the robot's reported speed. */
     private static double routingSpeed(RobotConnection c) {
         if (c.verdict == SafetyVerdict.SLOW) {
             return SLOW_SPEED;
         }
-        return c.lastReportedSpeed == 0.0 ? DEFAULT_CRUISE_SPEED : c.lastReportedSpeed;
+        return CRUISE_SPEED;
     }
 
     /** Non-routing commands (STOP, SLOW_DOWN, CONTINUE) - unchanged content, id drawn inside the connection lock. */
@@ -289,7 +290,6 @@ public class RobotChannelService
                 RobotConnection connection = thisConnection;
                 connection.verdict = verdict;
                 connection.lastTelemetryAt = missionManager.now();
-                connection.lastReportedSpeed = telemetry.getSpeed();
 
                 System.out.println(
                         "Telemetry: robot=" + telemetry.getRobotId()
@@ -361,7 +361,7 @@ public class RobotChannelService
                 } else if (verdict == SafetyVerdict.SLOW) {
                     sendPlain(connection, robotId, CommandType.COMMAND_TYPE_SLOW_DOWN, 1.0);
                 } else {
-                    sendPlain(connection, robotId, CommandType.COMMAND_TYPE_CONTINUE, telemetry.getSpeed());
+                    sendPlain(connection, robotId, CommandType.COMMAND_TYPE_CONTINUE, CRUISE_SPEED);
                 }
 
                 // g. One warning when a dispatch stays held under a persisting STOP for more than 10 s.
