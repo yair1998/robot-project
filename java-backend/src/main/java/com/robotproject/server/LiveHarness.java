@@ -72,8 +72,9 @@ public class LiveHarness {
                 report(service, mm, WorldObstructionReport.basic("h2", 10.0, 8.1, 1.3));
                 break;
             case "retreat_held":
-                waitFor(() -> onBD(mm, 4.0, Double.MAX_VALUE)
-                        && "STOP_PROXIMITY".equals(service.debugVerdict(ROBOT)), OVERALL_LIMIT);
+                // Any safety STOP: an agent with local safety reports its proximity hold as emergency_stop, which Java
+                // classifies STOP_EMERGENCY; the old agent's hold produced STOP_PROXIMITY.
+                waitFor(() -> onBD(mm, 4.0, Double.MAX_VALUE) && isSafetyStop(service.debugVerdict(ROBOT)), OVERALL_LIMIT);
                 report(service, mm, WorldObstructionReport.basic("h3", 10.0, 8.1, 1.3));
                 break;
             case "quiet_refresh":
@@ -122,6 +123,10 @@ public class LiveHarness {
                     break;
             }
         }
+    }
+
+    private static boolean isSafetyStop(String verdict) {
+        return "STOP_PROXIMITY".equals(verdict) || "STOP_EMERGENCY".equals(verdict);
     }
 
     private static boolean onBD(MissionManager mm, double minY, double maxY) {
