@@ -2,248 +2,85 @@
 #include "robot_channel.grpc.pb.h"
 
 #include <chrono>
-#include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 
+#include "core/clock.h"
+#include "core/command_mailbox.h"
+#include "core/control_core.h"
+#include "core/local_perception.h"
+#include "core/log.h"
+#include "core/motion_backend.h"
+#include "core/python_perception_adapter.h"
+#include "core/robot_config.h"
+#include "core/simulated_sensor_provider.h"
+#include "core/telemetry_channel.h"
+
 using grpc::ClientContext;
 using grpc::ClientReaderWriter;
-using grpc::Status;
 
 using robotagent::Command;
 using robotagent::RobotChannel;
 using robotagent::Telemetry;
 
+// Threads (nothing else touches robot state):
+//   control  (main thread)  - the ONLY mutator of robot state. Fixed period (config.control_period_s, 200 ms).
+//                              Each tick: command mailbox -> sensing + fusion -> navigation -> safety -> motion
+//                              backend -> telemetry snapshot. It never calls the network.
+//   gRPC reader             - Read() -> decode -> CommandMailbox (latest-wins waypoint, flags, bounded state).
+//   telemetry writer        - the ONLY caller of Write(). Waits for a newer snapshot; if Write() blocks under flow
+//                              control the control thread keeps running and the writer later skips to the newest.
+//   perception ingress      - whatever calls PythonPerceptionAdapter::offer(). Nothing yet: no receiver in this build.
+// Locks: CommandMailbox, TelemetryChannel, the adapter slot and the log mutex are leaf locks. No thread ever holds two
+// of them at once and none is held across Read()/Write(), so there is no lock order to get wrong.
+// Failure: a Read() or Write() failure marks the stream broken; the next tick latches a permanent local stop
+// (logged). Automatic reconnect is out of scope.
 namespace {
 
-constexpr double kFakeSpeedMetersPerSecond = 1.0;
-constexpr double kArrivalThresholdMeters = 0.3;
-constexpr auto kTelemetryInterval = std::chrono::milliseconds(200);
+std::mutex g_logMutex;
 
-constexpr double kLocalAvoidanceLegProgressStartMeters = 3.0;
-constexpr double kLocalAvoidanceLegProgressEndMeters = 5.0;
-constexpr double kEscalationLegProgressStartMeters = 6.0;
-constexpr double kEscalationLegProgressEndMeters = 8.0;
-constexpr double kLateralOffsetMeters = 0.8;
-constexpr double kClearObstacleDistance = 8.0;
-constexpr double kAvoidanceObstacleDistance = 1.5; // stays ABOVE
-    // Java's 1.0m STOP threshold on purpose - normal local
-    // avoidance must never by itself trigger Java's safety stop
-constexpr double kEscalationObstacleDistance = 0.5; // deliberately
-    // BELOW Java's 1.0m STOP threshold - this is how escalation
-    // reaches Java: through the EXISTING, unmodified safety
-    // branch, not a new message type
-constexpr double kEscalationClearAfterSeconds = 3.0; // the
-    // simulated obstacle clears this long after being detected,
-    // regardless of whether the robot is moving
+void logLine(const std::string& line) {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    std::cout << line << std::endl;
+}
 
-// Shared between the reader thread (writes new targets as commands
-// arrive) and the main loop (reads the target to move toward it).
-// This is the only shared state in the client - deliberately small.
-struct RobotState {
-    std::mutex mutex;
-
-    double position_x = 0.0;
-    double position_y = 0.0;
-
-    bool has_target = false;
-    double target_x = 0.0;
-    double target_y = 0.0;
-
-    bool stopped = false;
-
-    double target_speed = kFakeSpeedMetersPerSecond;
-
-    double leg_start_x = 0.0;
-    double leg_start_y = 0.0;
-    bool avoiding_obstacle = false;
-    double lateral_offset_meters = 0.0;
-    double sensed_obstacle_distance = kClearObstacleDistance;
-    bool in_escalation_zone = false;
-    bool escalation_handled_this_leg = false;
-    std::chrono::steady_clock::time_point escalation_zone_entered_at;
-};
-
-void applyCommand(RobotState& state, const Command& command) {
-    std::lock_guard<std::mutex> lock(state.mutex);
-
-    state.target_speed = command.target_speed();
-
-    if (command.type() == robotagent::COMMAND_TYPE_STOP) {
-        state.stopped = true;
-        return;
+robot::JavaCommand decode(const Command& command) {
+    robot::JavaCommand c;
+    switch (command.type()) {
+        case robotagent::COMMAND_TYPE_CONTINUE: c.type = robot::JavaCommandType::CONTINUE; break;
+        case robotagent::COMMAND_TYPE_SLOW_DOWN: c.type = robot::JavaCommandType::SLOW_DOWN; break;
+        case robotagent::COMMAND_TYPE_STOP: c.type = robot::JavaCommandType::STOP; break;
+        case robotagent::COMMAND_TYPE_RESUME: c.type = robot::JavaCommandType::RESUME; break;
+        case robotagent::COMMAND_TYPE_REROUTE: c.type = robot::JavaCommandType::REROUTE; break;
+        default: c.type = robot::JavaCommandType::UNSPECIFIED; break;
     }
-
-    state.stopped = false;
-
+    c.id = command.command_id();
+    c.target_speed = command.target_speed();
     if (command.has_target()) {
-        state.leg_start_x = state.position_x;
-        state.leg_start_y = state.position_y;
-        state.in_escalation_zone = false;
-        state.escalation_handled_this_leg = false;
-
-        state.has_target = true;
-        state.target_x = command.target().x();
-        state.target_y = command.target().y();
-
-        std::cout
-            << "New target: (" << state.target_x << ", " << state.target_y << ")"
-            << std::endl;
+        c.waypoint = robot::Point{command.target().x(), command.target().y()};
     }
+    return c;
 }
 
-double legProgressMetersLocked(const RobotState& state) {
-    double dx = state.position_x - state.leg_start_x;
-    double dy = state.position_y - state.leg_start_y;
-    return std::sqrt(dx * dx + dy * dy);
-}
-
-// Sensing runs unconditionally every tick, regardless of stopped/has_target -
-// a real proximity sensor doesn't stop sensing just because the robot isn't
-// moving. Since there's no real sensor yet, this drives two fixed simulated
-// zones along whichever leg is active, purely to exercise the end-to-end
-// path: local avoidance (handled entirely here, Java never sees it) and a
-// severe-obstacle escalation (reported to Java via sensed_obstacle_distance,
-// through the existing safety branch). The escalation zone clears based on
-// ELAPSED TIME rather than distance traveled - if it depended on distance, a
-// full STOP (which halts movement) would prevent the very progress needed to
-// clear the zone, deadlocking permanently.
-void updateSimulatedSensorLocked(RobotState& state) {
-    if (!state.has_target) {
-        state.avoiding_obstacle = false;
-        state.lateral_offset_meters = 0.0;
-        state.sensed_obstacle_distance = kClearObstacleDistance;
-        return;
-    }
-
-    double legProgress = legProgressMetersLocked(state);
-
-    bool inAvoidanceZone = legProgress >= kLocalAvoidanceLegProgressStartMeters
-            && legProgress < kLocalAvoidanceLegProgressEndMeters;
-    bool inEscalationZoneByPosition = legProgress >= kEscalationLegProgressStartMeters
-            && legProgress < kEscalationLegProgressEndMeters;
-
-    bool wasAvoiding = state.avoiding_obstacle;
-    state.avoiding_obstacle = inAvoidanceZone;
-    state.lateral_offset_meters = inAvoidanceZone ? kLateralOffsetMeters : 0.0;
-
-    if (inAvoidanceZone && !wasAvoiding) {
-        std::cout << "[local-nav] Simulated obstacle ahead - deviating "
-                  << state.lateral_offset_meters << "m to clear it" << std::endl;
-    }
-    if (!inAvoidanceZone && wasAvoiding) {
-        std::cout << "[local-nav] Clear - converging back to the direct path" << std::endl;
-    }
-
-    // Entry: only while this zone hasn't already fired-and-cleared once on
-    // this same leg (prevents re-triggering on the tail of the zone once the
-    // robot resumes moving after a time-based clear).
-    if (inEscalationZoneByPosition && !state.in_escalation_zone
-            && !state.escalation_handled_this_leg) {
-        state.in_escalation_zone = true;
-        state.escalation_zone_entered_at = std::chrono::steady_clock::now();
-        std::cout << "[local-nav] Simulated severe obstacle - no clear path, reporting to Java" << std::endl;
-    }
-
-    // Clearing: TIME-based, runs regardless of whether the robot is
-    // currently stopped - this is what breaks the deadlock. A real dynamic
-    // obstacle clears on its own over time; it doesn't wait for the robot it
-    // just forced to stop to somehow keep moving.
-    if (state.in_escalation_zone) {
-        double elapsed = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - state.escalation_zone_entered_at).count();
-        if (elapsed >= kEscalationClearAfterSeconds) {
-            state.in_escalation_zone = false;
-            state.escalation_handled_this_leg = true;
-            std::cout << "[local-nav] Simulated obstacle cleared after "
-                      << elapsed << "s" << std::endl;
-        }
-    }
-
-    if (state.in_escalation_zone) {
-        state.sensed_obstacle_distance = kEscalationObstacleDistance;
-    } else if (inAvoidanceZone) {
-        state.sensed_obstacle_distance = kAvoidanceObstacleDistance;
-    } else {
-        state.sensed_obstacle_distance = kClearObstacleDistance;
-    }
-}
-
-// Moves position toward the current target by one tick's worth of
-// distance. No map, no long-range obstacle awareness - exactly the
-// boundary already agreed on: Java decides where, C++ only knows how to
-// get a little closer to there (now with a local reactive deviation
-// layered on top, see updateSimulatedSensorLocked - the target itself
-// never changes here, only the path taken to it).
-void advancePosition(RobotState& state, double dtSeconds) {
-    std::lock_guard<std::mutex> lock(state.mutex);
-
-    updateSimulatedSensorLocked(state);
-
-    if (state.stopped || !state.has_target) {
-        return;
-    }
-
-    double aimX = state.target_x;
-    double aimY = state.target_y;
-
-    if (state.lateral_offset_meters != 0.0) {
-        double dirX = state.target_x - state.position_x;
-        double dirY = state.target_y - state.position_y;
-        double dirLen = std::sqrt(dirX * dirX + dirY * dirY);
-        if (dirLen > 1e-6) {
-            double perpX = -dirY / dirLen;
-            double perpY = dirX / dirLen;
-            aimX += perpX * state.lateral_offset_meters;
-            aimY += perpY * state.lateral_offset_meters;
-        }
-    }
-
-    // Arrival is checked against the REAL target, never the
-    // laterally-offset aim point - the offset only shapes the path
-    // taken, it never changes what "arrived" means, and it never
-    // changes what target Java thinks is active.
-    double dxReal = state.target_x - state.position_x;
-    double dyReal = state.target_y - state.position_y;
-    double distanceToRealTarget = std::sqrt(dxReal * dxReal + dyReal * dyReal);
-
-    if (distanceToRealTarget < kArrivalThresholdMeters) {
-        std::cout
-            << "Arrived at target (" << state.target_x << ", " << state.target_y << ")"
-            << std::endl;
-        state.has_target = false;
-        return;
-    }
-
-    double dx = aimX - state.position_x;
-    double dy = aimY - state.position_y;
-    double distance = std::sqrt(dx * dx + dy * dy);
-
-    if (distance > 1e-6) {
-        double step = state.target_speed * dtSeconds;
-        double ratio = step / distance;
-        state.position_x += dx * ratio;
-        state.position_y += dy * ratio;
-    }
-}
-
-Telemetry buildTelemetry(RobotState& state, const std::string& robotId, int64_t timestamp) {
-    std::lock_guard<std::mutex> lock(state.mutex);
-
+Telemetry encode(const robot::TelemetrySnapshot& s, const std::string& robotId, int64_t timestamp) {
     Telemetry telemetry;
     telemetry.set_robot_id(robotId);
-    telemetry.set_position_x(state.position_x);
-    telemetry.set_position_y(state.position_y);
-    telemetry.set_speed(state.stopped ? 0.0 : kFakeSpeedMetersPerSecond);
-    telemetry.set_battery(90.0);
+    telemetry.set_position_x(s.position.x);
+    telemetry.set_position_y(s.position.y);
+    telemetry.set_speed(s.measured_speed_mps);   // measured; the requested speed is not reported (one speed field)
+    telemetry.set_battery(s.battery);
     telemetry.set_timestamp(timestamp);
-    telemetry.set_emergency_stop(false);
-    telemetry.set_nearest_obstacle_distance(state.sensed_obstacle_distance);
-
+    telemetry.set_emergency_stop(s.emergency_stop);
+    if (s.nearest_obstacle_m) {
+        telemetry.set_nearest_obstacle_distance(*s.nearest_obstacle_m);   // absent when no valid reading
+    }
     return telemetry;
 }
 
@@ -252,43 +89,78 @@ Telemetry buildTelemetry(RobotState& state, const std::string& robotId, int64_t 
 int main() {
     const char* envTarget = std::getenv("GRPC_TARGET");
     std::string target = envTarget ? envTarget : "host.docker.internal:50051";
+    const std::string robotId = "robot-1";
 
-    std::cout << "Connecting to " << target << std::endl;
+    logLine("Connecting to " + target);
+
+    robot::RobotConfig config;
+    robot::SteadyClock clock;
+    robot::LogSink log = logLine;
+
+    robot::SimulatedSensorProvider sim(config.sim, log);
+    robot::PythonPerceptionAdapter python(config.python,
+                                          config.nav.robot_half_width_m + config.nav.clearance_margin_m, clock);
+    robot::LocalPerception perception(config.perception,
+                                      {{&sim, robot::SourceRole::REQUIRED_FOR_SAFETY},
+                                       {&python, robot::SourceRole::SUPPLEMENTARY}});
+    robot::SimulatedMotionBackend motion(config.motion);
+    robot::CommandMailbox mailbox;
+    robot::TelemetryChannel telemetryChannel;
+    robot::ControlCore core(config, clock, motion, mailbox, perception, &sim, telemetryChannel, log);
+
+    logLine("[perception] " + sim.id() + ": REQUIRED_FOR_SAFETY; " + python.id()
+            + ": SUPPLEMENTARY, UNAVAILABLE until a receiver feeds it (none in this build)");
 
     auto channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
     std::unique_ptr<RobotChannel::Stub> stub = RobotChannel::NewStub(channel);
-
     ClientContext context;
     std::shared_ptr<ClientReaderWriter<Telemetry, Command>> stream(stub->Connect(&context));
 
-    RobotState state;
-
-    std::thread reader([stream, &state]() {
+    std::thread reader([stream, &mailbox]() {
         Command command;
         while (stream->Read(&command)) {
-            std::cout
-                << "Command received: id=" << command.command_id()
-                << " type=" << robotagent::CommandType_Name(command.type())
-                << std::endl;
-            applyCommand(state, command);
+            logLine("Command received: id=" + std::to_string(command.command_id()) + " type="
+                    + robotagent::CommandType_Name(command.type()));
+            robot::JavaCommand decoded = decode(command);
+            if (decoded.waypoint) {
+                std::ostringstream line;   // same format as the old agent
+                line << "New target: (" << decoded.waypoint->x << ", " << decoded.waypoint->y << ")";
+                logLine(line.str());
+            }
+            if (mailbox.post(decoded)) {
+                logLine(std::string("[command] ") + robot::toString(decoded.type) + " id=" + std::to_string(decoded.id)
+                        + " carries target_speed " + robot::fmt(decoded.target_speed)
+                        + " <= 0 - treated as unspecified, speed limit unchanged");
+            }
+        }
+        logLine("[stream] Read() ended - the Java stream is closed");
+        mailbox.markStreamBroken("Read() returned false");
+    });
+
+    std::thread writer([stream, &telemetryChannel, &mailbox, robotId]() {
+        uint64_t lastSeq = 0;
+        int64_t timestamp = 0;
+        while (true) {
+            std::optional<robot::TelemetrySnapshot> snapshot = telemetryChannel.waitNewer(lastSeq);
+            if (!snapshot) {
+                return;
+            }
+            lastSeq = snapshot->seq;
+            if (!stream->Write(encode(*snapshot, robotId, ++timestamp))) {
+                logLine("[stream] Write() failed - the Java stream is broken");
+                mailbox.markStreamBroken("Write() failed");
+                return;
+            }
         }
     });
 
-    int64_t timestamp = 0;
-    const std::string robotId = "robot-1";
-    const double tickSeconds =
-        std::chrono::duration<double>(kTelemetryInterval).count();
-
-    // Runs indefinitely - this is the real client loop now, not a
-    // fixed test sequence. Stop with Ctrl+C for now; graceful shutdown
-    // (WritesDone/Finish on signal) is a known gap, not an oversight -
-    // not worth solving before there's a real path to walk.
+    // Runs until the process is killed (graceful shutdown remains a known gap, as before).
+    auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>(config.control_period_s));
+    auto next = std::chrono::steady_clock::now();
     while (true) {
-        advancePosition(state, tickSeconds);
-
-        Telemetry telemetry = buildTelemetry(state, robotId, ++timestamp);
-        stream->Write(telemetry);
-
-        std::this_thread::sleep_for(kTelemetryInterval);
+        core.tick();
+        next += period;
+        std::this_thread::sleep_until(next);
     }
 }
