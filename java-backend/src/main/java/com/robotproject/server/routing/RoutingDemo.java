@@ -13,14 +13,14 @@ public class RoutingDemo {
         System.out.println("Route A -> E, all edges open:");
         printPath(router.findPath(graph, "A", "E"));
 
-        System.out.println("\nBlocking B -> D (capacity 0.0)...");
-        graph.setEdgeCapacity("B", "D", 0.0);
+        System.out.println("\nBlocking B -> D (remaining width 0.3m, below the 0.6m robot)...");
+        graph.getEdge("B", "D").reportObstructionEvent("routing-demo-block", 0.3);
 
         System.out.println("Route A -> E, B->D blocked:");
         printPath(router.findPath(graph, "A", "E"));
 
-        System.out.println("\nPartially clearing B -> D (capacity 0.3)...");
-        graph.setEdgeCapacity("B", "D", 0.3);
+        System.out.println("\nPartially clearing B -> D (remaining width 0.69m, about 30% of the margin band)...");
+        graph.getEdge("B", "D").reportObstructionEvent("routing-demo-block", 0.69);
 
         System.out.println("Route A -> E, B->D at 30% capacity:");
         printPath(router.findPath(graph, "A", "E"));
